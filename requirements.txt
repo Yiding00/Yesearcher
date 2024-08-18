@@ -1,0 +1,4 @@
+lxml==5.3.0
+pytz==2024.1
+pyzotero==1.5.20
+Requests==2.32.3
