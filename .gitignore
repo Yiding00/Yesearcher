@@ -15,3 +15,5 @@ METADATA.py
 all_infos*
 __pycache__
 *.xml
+*.db
+*test*

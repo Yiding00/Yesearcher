@@ -3,8 +3,11 @@ from lxml import etree
 from datetime import datetime
 import pytz
 from pyzotero import zotero
-from METADATA import API_KEY, LIBRARY_ID, LIBRARY_TYPE, COLLECTION_KEY
+from METADATA import ZOTERO_API_KEY, LIBRARY_ID, LIBRARY_TYPE, COLLECTION_KEY, ZHIPU_KEY
 import requests
+from zhipuai import ZhipuAI
+import os
+import sqlite3
 
 
 def save_papers_info_csv(csv_file_path, works):
@@ -40,6 +43,8 @@ def save_papers_info_rssfeed(xml_file, works):
         item = etree.SubElement(channel, 'item')
         title = etree.SubElement(item, 'title')
         title.text = work['title']
+        id = etree.SubElement(item, 'id')
+        id.text = work['id'][21:]
         description = etree.SubElement(item, 'description')
         description.text = work["abstract"]
         pubDate = etree.SubElement(item, 'pubDate')
@@ -71,9 +76,11 @@ def save_papers_info_rssfeed(xml_file, works):
     with open(xml_file, 'wb') as file:
         file.write(etree.tostring(rss, pretty_print=True, xml_declaration=True, encoding='UTF-8'))
 
+
+
 def save_to_zotero(item):
 
-    zot = zotero.Zotero(LIBRARY_ID, LIBRARY_TYPE, API_KEY)
+    zot = zotero.Zotero(LIBRARY_ID, LIBRARY_TYPE, ZOTERO_API_KEY)
     title = item.find('title').text
     authors = item.find('first_author').text
     publication_date = item.find('pubDate').text
@@ -111,3 +118,82 @@ def find_and_attach_pdf(item_key, doi,zot):
             zot.attachment_add_link(pdf_link, item_key)
 
 
+def translate(text):
+    client = ZhipuAI(api_key=ZHIPU_KEY)
+
+    response = client.chat.completions.create(
+        model="glm-4-plus",
+        messages=[
+            {
+                "role": "system",
+                "content": "你是一个翻译专家，需要专注于英文书籍的翻译，确保准确性和专业性，同时符合中文表达习惯。你的任务是准确、专业地将英文语句翻译成中文，保持原意，符合中文表达习惯。" 
+            },
+            {
+                "role": "user",
+                "content": text
+            }
+        ],
+        top_p= 0.7,
+        temperature= 0.95,
+        max_tokens=1024,
+        tools = [{"type":"web_search","web_search":{"search_result":True}}],
+        stream=False
+    )
+    translation = response.choices[0].message.content if response.choices else "翻译失败"
+    return translation
+
+def check_id_exist(cursor, id):
+    cursor.execute('''
+SELECT COUNT(*) FROM papers WHERE id = ?
+''', (id,))
+    return cursor.fetchone()[0]
+
+def delete_id(id):
+    conn = sqlite3.connect('papers.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    DELETE FROM papers WHERE id = ?
+    ''', (id,))
+    conn.commit()
+    conn.close()
+
+
+def check_database():
+    if os.path.exists('papers.db')!=True:
+        # 创建一个数据库连接（文件数据库）
+        conn = sqlite3.connect('papers.db')
+        cursor = conn.cursor()
+
+        # 执行 SQL 语句
+
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS papers (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            abstract TEXT,
+            translation TEXT,
+            link TEXT,
+            journal TEXT,
+            author TEXT,
+            pubDate TEXT,
+            citation_count INTEGER,
+            rate INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+        ''')
+
+        # 提交更改并关闭连接
+        conn.commit()
+        conn.close()
+
+def check_METADATA():
+    file_path = 'METADATA.py'
+    if os.path.exists(file_path)!=True:
+        with open(file_path, 'w') as file:
+            # 写入内容
+            file.write("""ZOTERO_API_KEY = 'xxx'
+LIBRARY_ID = 'xxx'
+LIBRARY_TYPE = 'user'
+COLLECTION_KEY = 'xxx'
+ZHIPU_KEY = 'xxx.xxx'""")
